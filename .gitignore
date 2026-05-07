@@ -1,0 +1,8 @@
+**/__pycache__/
+**/build/
+.env
+.legacy/
+.claude/
+.vscode/
+results/
+sandbox/
