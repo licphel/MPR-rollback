@@ -40,7 +40,6 @@ def _get_client() -> OpenAI:
 # ---------------------------------------------------------------------------
 
 # Model used for both risk evaluation and desensitisation.
-# deepseek-chat = DeepSeek-V3 (latest production chat model via DeepSeek API).
 MODEL = "deepseek-chat"
 
 # Sampling temperature for evaluate_risk().
@@ -156,3 +155,5 @@ def desensitize_act(target_step: int, ctx, dry_run: bool = False) -> None:
     )
     traj.observation = resp.choices[0].message.content.strip()
     ctx.step_risks[target_step] = 0.0
+    # evaluate_risk(traj) # strict verification: re-evaluate risk
+    # currently we assume that, after sanitization, risk will decrease to 0.

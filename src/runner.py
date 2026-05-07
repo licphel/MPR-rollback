@@ -177,13 +177,14 @@ def main() -> None:
     print(f"\n{'='*60}")
     print("Summary comparison")
     print(f"{'='*60}")
-    header = f"{'strategy':<22} {'VR':>6} {'unsafe%':>8} {'avg_SC':>7} {'avg_san_steps':>14} {'avg_depth':>10} {'avg_risk':>9}"
+    header = f"{'strategy':<22} {'VR':>6} {'FCR':>6} {'unsafe%':>8} {'avg_SC':>7} {'avg_san_steps':>14} {'avg_depth':>10} {'avg_risk':>9}"
     print(header)
     print("-" * len(header))
     for s in all_summaries:
         print(
             f"{s['strategy']:<22} "
             f"{s['violation_reduction']:>6.3f} "
+            f"{s.get('full_coverage_rate', 0.0):>6.3f} "
             f"{s['unsafe_output_rate']:>8.3f} "
             f"{s['avg_sc']:>7.3f} "
             f"{s['avg_sanitized_steps']:>14.2f} "

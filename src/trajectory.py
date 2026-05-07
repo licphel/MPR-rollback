@@ -57,7 +57,7 @@ def influence_factor(step_loc: int, ctx: Context) -> float:
 
 def risk_tolerance(ctx: Context) -> float:
     """Accumulated-risk threshold above which a repair is triggered."""
-    return 0.5 + ctx.steps * 0.001
+    return 0.5
 
 
 def risk_decrease_threshold(ctx: Context) -> float:

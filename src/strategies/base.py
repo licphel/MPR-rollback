@@ -28,6 +28,7 @@ class CaseResult:
     task_category:        str
     ground_truth_violated: bool
     post_repair_violated:  bool
+    orig_violated_indices: list[int]    # 0-based indices of ground-truth violation steps
     steps_sanitized:       list[int]   # 0-based indices of sanitized steps
     rollback_count:        int
     rollback_depth:        int         # cumulative steps rolled back across all rollbacks
@@ -43,6 +44,7 @@ class CaseResult:
             "task_category":          self.task_category,
             "ground_truth_violated":  self.ground_truth_violated,
             "post_repair_violated":   self.post_repair_violated,
+            "orig_violated_indices":  self.orig_violated_indices,
             "steps_sanitized":        self.steps_sanitized,
             "rollback_count":         self.rollback_count,
             "rollback_depth":         self.rollback_depth,
@@ -163,6 +165,7 @@ def run_with_repair_fn(
         task_category         = traj_json.get("task_category", ""),
         ground_truth_violated = ground_truth_violated,
         post_repair_violated  = post_repair_violated,
+        orig_violated_indices = sorted(orig_violated_indices),
         steps_sanitized       = sorted(sanitized_set),
         rollback_count        = rollback_count,
         rollback_depth        = rollback_depth,

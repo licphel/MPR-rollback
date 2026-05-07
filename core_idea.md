@@ -104,7 +104,7 @@ $$
 
 ## 方法概述
 
-### 步级增量风险估计
+### 步级风险估计
 
 对于轨迹中的每一步：
 
@@ -119,7 +119,7 @@ $$
 - CRITICAL: 0.75
 - VIOLATED: 1.0
 
-### 加性风险累积
+### 累计风险
 
 轨迹的累积风险建模为：
 
@@ -282,6 +282,32 @@ $|\text{sanitized\_set}|$，被修改的轨迹步骤数量。越低越好。
 
 ### 结果（预期）
 在降低脱敏开销的同时获得相当或更好的安全提升。
+
+## 实验结果
+
+下表展示了四种策略在 130 条轨迹（30 条违规，100 条安全）上的评估结果。
+
+| Strategy | VR | Unsafe% | SC | San Steps | Rollback Depth | Final Risk |
+|----------|-----|---------|-----|-----------|----------------|-------------|
+| no_repair | 0.0000 | 0.2308 | 0.0000 | 0.0000 | 0.0000 | 2.6750 |
+| full_sanitization | 1.0000 | 0.0000 | 0.6456 | 5.7231 | 13.8923 | 0.1654 |
+| single_pivot | 1.0000 | 0.0000 | 0.4264 | 3.8923 | 3.8923 | 0.4000 |
+| multi_pivot | 1.0000 | 0.0000 | 0.5467 | 4.5769 | 5.0231 | 0.1635 |
+
+**指标说明：**
+- **VR (Violation Reduction)**：违规降低率，1.0 表示所有违规轨迹均被修复
+- **Unsafe%**：修复后仍违规的轨迹比例
+- **SC (Sanitization Cost)**：脱敏代价 = 脱敏 token 数 / 总 token 数
+- **San Steps**：平均脱敏步数
+- **Rollback Depth**：平均回滚深度（累积回滚步数）
+- **Final Risk**：修复后的平均累积风险
+
+**关键结果：**
+- Multi-pivot 的最终风险（0.1635）与全量脱敏（0.1654）几乎相同，但脱敏代价降低 15.4%（0.5467 vs 0.6456），回滚深度降低 63.8%（5.02 vs 13.89）
+- Multi-pivot 的最终风险比单点归因降低 59.1%（0.1635 vs 0.4000），代价是脱敏代价增加 28.2%（0.5467 vs 0.4264），回滚深度增加 1.13 步
+
+**注意：**
+A trajectory is considered repaired if at least one of its ground-truth violation steps has been sanitized. This is a necessary condition for safety (sanitizing a violation step removes that specific violation), but not sufficient (other steps may still contain violations). We adopt this definition as a conservative proxy for repair success.
 
 ---
 

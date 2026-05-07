@@ -1,7 +1,8 @@
 """Metric computation for repair strategy evaluation.
 
 Metrics (CPR excluded per project spec):
-  - violation_reduction   VR  = 1 - V_after / V_before
+  - violation_reduction   VR  = 1 - V_after / V_before   (loose: >=1 vio step covered)
+  - full_coverage_rate   FCR  = fraction of violated trajectories where ALL vio steps covered
   - unsafe_output_rate        = violations_after / n_trajectories
   - avg_sc                    = mean sanitization cost (sanitized_tokens / total_tokens)
   - avg_sanitized_steps       = mean count of sanitized steps per trajectory
@@ -38,6 +39,15 @@ def compute_summary(cases: Sequence[dict], strategy_name: str) -> dict:
     )
     unsafe_output_rate = round(violations_after / n, 4)
 
+    # Full-coverage rate (FCR): fraction of violated trajectories where ALL
+    # ground-truth violation steps were sanitized (strict repair success).
+    full_coverage = sum(
+        1 for c in violated_cases
+        if set(c.get("orig_violated_indices", [])).issubset(set(c["steps_sanitized"]))
+        and len(c.get("orig_violated_indices", [])) > 0
+    )
+    fcr = round(full_coverage / violations_before, 4) if violations_before > 0 else 0.0
+
     def _mean(values) -> float:
         vals = list(values)
         return round(sum(vals) / len(vals), 4) if vals else 0.0
@@ -55,6 +65,7 @@ def compute_summary(cases: Sequence[dict], strategy_name: str) -> dict:
         "violations_before":   violations_before,
         "violations_after":    violations_after,
         "violation_reduction": vr,
+        "full_coverage_rate":  fcr,
         "unsafe_output_rate":  unsafe_output_rate,
         "avg_sc":              avg_sc,
         "avg_sanitized_steps": avg_sanitized_steps,

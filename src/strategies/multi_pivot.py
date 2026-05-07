@@ -40,15 +40,23 @@ def attribute(ctx: Context, dry_run: bool = False) -> list[int]:
         weight   = influence_factor(step_loc, ctx)
         contributions.append((i, cached * weight))
 
-    # Greedy: pick highest-contribution steps until projected risk ≤ target
+    # Greedy: pick highest-contribution steps until recomputed risk ≤ target.
+    # After tentatively zeroing out each selected step, recompute the full
+    # prefix sum rather than subtracting the weighted score — this avoids the
+    # mismatch between the unweighted cumulative risk r_t and the weighted
+    # scores w_i used for ranking.
     contributions.sort(key=lambda x: x[1], reverse=True)
     selected: list[int] = []
-    projected = ctx.risk
-    for idx, contrib in contributions:
-        if projected <= target:
-            break
+    zeroed: set[int] = set()
+    for idx, _ in contributions:
         selected.append(idx)
-        projected -= contrib
+        zeroed.add(idx)
+        recomputed = sum(
+            0.0 if i in zeroed else ctx.step_risks.get(i, 0.0)
+            for i in range(ctx.steps)
+        )
+        if recomputed <= target:
+            break
 
     return selected
 
