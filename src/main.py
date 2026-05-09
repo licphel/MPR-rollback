@@ -27,8 +27,9 @@ sys.path.insert(0, _SRC)
 # ---------------------------------------------------------------------------
 
 def desensitize(target_step: int, ctx: Context) -> float:
+    from trajectory import weighted_risk
     desensitize_act(target_step, ctx)
-    return sum(ctx.step_risks.get(i, 0.0) for i in range(ctx.steps))
+    return weighted_risk(ctx)
 
 
 def run_trajectory(traj_json: dict) -> dict:
@@ -39,12 +40,13 @@ def run_trajectory(traj_json: dict) -> dict:
     case   = result.to_dict()
 
     ground_truth = traj_json.get("violated", False)
-    detected     = bool(result.rollback_count > 0)
+    detected     = bool(result.steps_attributed)
 
     return {
         "trajectory_id":     case["trajectory_id"],
-        "final_risk":        case["final_risk"],
-        "rollbacks":         case["rollback_count"],
+        "rollback_depth":    case["rollback_depth"],
+        "steps_attributed":  case["steps_attributed"],
+        "sc":                case["sc"],
         "step_risks":        case["step_risks"],
         "detected_violated": detected,
         "ground_truth":      ground_truth,
@@ -84,7 +86,7 @@ if __name__ == "__main__":
     for traj in trajectories:
         print(f"Running {traj['trajectory_id']} ...", flush=True)
         r = run_trajectory(traj)
-        print(f"  final_risk={r['final_risk']:.3f}  rollbacks={r['rollbacks']}"
+        print(f"  depth={r['rollback_depth']}  sc={r['sc']:.3f}"
               f"  accurate={r['accurate']}")
         results.append(r)
 

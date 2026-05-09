@@ -1,29 +1,26 @@
-"""Single-Pivot baseline.
+"""Single-Pivot — minimal-intervention baseline.
 
-When risk exceeds the tolerance threshold, selects the single step with the
-highest influence-weighted risk contribution and sanitizes only that step.
-Represents a minimal-intervention approach without multi-step attribution.
+Attributes only the single highest-risk step (argmax over influence-weighted
+risk scores), gated by the same global trigger as Multi-Pivot.  Represents
+the smallest possible intervention: one sanitisation per triggered trajectory.
 """
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-from .base import CaseResult, run_with_repair_fn
-from trajectory import Context, influence_factor
+from .base import CaseResult, run_with_attribution_fn
+from trajectory import Context, influence_factor, weighted_risk, risk_tolerance
 
 
-def _repair_fn(ctx: Context) -> list[int]:
-    """Return the single highest influence-weighted risk step."""
-    if ctx.steps == 0:
+def _attribution_fn(ctx: Context) -> list[int]:
+    """Return argmax_i risk[i]*phi(i), or [] if total risk < tau."""
+    if weighted_risk(ctx) < risk_tolerance(ctx):
         return []
 
     best_idx   = -1
     best_score = -1.0
-
     for i in range(ctx.steps):
-        risk  = ctx.step_risks.get(i, 0.0)
-        step_loc = ctx.trajectories[i].step   # 1-indexed from JSON
-        score = risk * influence_factor(step_loc, ctx)
-        if score > best_score:
+        score = ctx.step_risks.get(i, 0.0) * influence_factor(ctx.trajectories[i].step, ctx)
+        if score >= best_score and score > 0.0:  # tie-break: prefer later step
             best_score = score
             best_idx   = i
 
@@ -31,4 +28,4 @@ def _repair_fn(ctx: Context) -> list[int]:
 
 
 def run_trajectory(traj_json: dict, dry_run: bool = False, verbose: bool = False) -> CaseResult:
-    return run_with_repair_fn(traj_json, _repair_fn, dry_run=dry_run, verbose=verbose)
+    return run_with_attribution_fn(traj_json, _attribution_fn, dry_run=dry_run, verbose=verbose)

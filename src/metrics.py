@@ -1,74 +1,53 @@
-"""Metric computation for repair strategy evaluation.
+"""Metric computation for attribution strategy evaluation.
 
-Metrics (CPR excluded per project spec):
-  - violation_reduction   VR  = 1 - V_after / V_before   (loose: >=1 vio step covered)
-  - full_coverage_rate   FCR  = fraction of violated trajectories where ALL vio steps covered
-  - unsafe_output_rate        = violations_after / n_trajectories
-  - avg_sc                    = mean sanitization cost (sanitized_tokens / total_tokens)
-  - avg_sanitized_steps       = mean count of sanitized steps per trajectory
-  - avg_rollback_depth        = mean cumulative rollback steps
-  - avg_final_risk            = mean final accumulated risk
+Four core metrics:
+  FCR  — Full-Coverage Rate: fraction of violated trajectories where ALL
+          ground-truth violation steps are covered by the attribution set.
+  F1   — mean per-trajectory F1 over step-level GT labels (violated only).
+  SC   — Sanitization Cost: attributed tokens / total tokens (across all
+          trajectories, including safe ones).
+  RD   — Rollback Depth: mean hypothetical replay cost = len(steps) - min(S),
+          reflecting how far back execution would need to restart.
 """
 from __future__ import annotations
 from typing import Sequence
 
 
 def compute_summary(cases: Sequence[dict], strategy_name: str) -> dict:
-    """Aggregate per-case dicts into a summary metrics dict.
-
-    Args:
-        cases:          list of CaseResult.to_dict() outputs.
-        strategy_name:  name string embedded in the output.
-
-    Returns:
-        Summary dict with all scalar metrics.
-    """
     n = len(cases)
     if n == 0:
         return {"strategy": strategy_name, "n_trajectories": 0}
 
     violated_cases = [c for c in cases if c["ground_truth_violated"]]
-    safe_cases     = [c for c in cases if not c["ground_truth_violated"]]
-
-    violations_before = len(violated_cases)
-    violations_after  = sum(1 for c in violated_cases if c["post_repair_violated"])
-
-    vr = (
-        round(1.0 - violations_after / violations_before, 4)
-        if violations_before > 0 else 0.0
-    )
-    unsafe_output_rate = round(violations_after / n, 4)
-
-    # Full-coverage rate (FCR): fraction of violated trajectories where ALL
-    # ground-truth violation steps were sanitized (strict repair success).
-    full_coverage = sum(
-        1 for c in violated_cases
-        if set(c.get("orig_violated_indices", [])).issubset(set(c["steps_sanitized"]))
-        and len(c.get("orig_violated_indices", [])) > 0
-    )
-    fcr = round(full_coverage / violations_before, 4) if violations_before > 0 else 0.0
+    n_violated = len(violated_cases)
 
     def _mean(values) -> float:
         vals = list(values)
         return round(sum(vals) / len(vals), 4) if vals else 0.0
 
-    avg_sc               = _mean(c["sc"]             for c in cases)
-    avg_sanitized_steps  = _mean(len(c["steps_sanitized"]) for c in cases)
-    avg_rollback_depth   = _mean(c["rollback_depth"] for c in cases)
-    avg_final_risk       = _mean(c["final_risk"]     for c in cases)
+    # FCR: over violated trajectories only
+    fcr = (
+        round(sum(1 for c in violated_cases if c["full_coverage"]) / n_violated, 4)
+        if n_violated > 0 else 0.0
+    )
+
+    # F1: mean over violated trajectories only
+    avg_f1 = (
+        _mean(c["f1"] for c in violated_cases)
+        if n_violated > 0 else 0.0
+    )
+
+    # SC and RD: over all trajectories (safe trajectories contribute 0)
+    avg_sc             = _mean(c["sc"]             for c in cases)
+    avg_rollback_depth = _mean(c["rollback_depth"] for c in cases)
 
     return {
         "strategy":            strategy_name,
         "n_trajectories":      n,
-        "n_violated":          violations_before,
-        "n_safe":              len(safe_cases),
-        "violations_before":   violations_before,
-        "violations_after":    violations_after,
-        "violation_reduction": vr,
-        "full_coverage_rate":  fcr,
-        "unsafe_output_rate":  unsafe_output_rate,
+        "n_violated":          n_violated,
+        "n_safe":              n - n_violated,
+        "fcr":                 fcr,
+        "avg_f1":              avg_f1,
         "avg_sc":              avg_sc,
-        "avg_sanitized_steps": avg_sanitized_steps,
         "avg_rollback_depth":  avg_rollback_depth,
-        "avg_final_risk":      avg_final_risk,
     }

@@ -1,9 +1,13 @@
-"""Shared infrastructure for all repair strategies.
+"""Shared infrastructure for all attribution strategies.
 
-Provides:
-  - CaseResult  — per-trajectory result container
-  - count_tokens — simple word-count token approximation
-  - run_with_repair_fn — unified execution loop parameterised by repair policy
+Global-attribution framework:
+  1. Evaluate risk for every step in one forward pass.
+  2. Call attribution_fn(ctx) → list[int] to select the sanitization set S.
+  3. Sanitize steps in S, then compute FCR / SC / rollback_depth.
+
+No step-by-step trigger loop, no rollback re-execution.
+Rollback depth is computed as a hypothetical replay cost:
+  depth = len(steps) - min(S)   (steps that would need to be re-run)
 """
 from __future__ import annotations
 
@@ -11,11 +15,10 @@ import sys
 import os
 from dataclasses import dataclass, field
 
-# Allow `from strategies.base import ...` whether run as a package or directly
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-from evaluate import evaluate_risk, desensitize_act
-from trajectory import Trajectory, Context, risk_tolerance, risk_decrease_threshold
+from evaluate import evaluate_risk
+from trajectory import Trajectory, Context, weighted_risk, risk_tolerance
 
 
 # ---------------------------------------------------------------------------
@@ -24,35 +27,30 @@ from trajectory import Trajectory, Context, risk_tolerance, risk_decrease_thresh
 
 @dataclass
 class CaseResult:
-    trajectory_id:        str
-    task_category:        str
-    ground_truth_violated: bool
-    post_repair_violated:  bool
-    orig_violated_indices: list[int]    # 0-based indices of ground-truth violation steps
-    steps_sanitized:       list[int]   # 0-based indices of sanitized steps
-    rollback_count:        int
-    rollback_depth:        int         # cumulative steps rolled back across all rollbacks
-    tokens_total:          int         # word-count sum over all observations
-    tokens_sanitized:      int         # word-count of sanitized steps (original content)
-    sc:                    float       # sanitization cost = tokens_sanitized / tokens_total
-    final_risk:            float
-    step_risks:            dict        # str-keyed for JSON serialisation
+    trajectory_id:          str
+    task_category:          str
+    ground_truth_violated:  bool
+    orig_violated_indices:  list[int]   # 0-based GT violation step indices
+    steps_attributed:       list[int]   # 0-based indices selected by attribution
+    full_coverage:          bool        # all GT vio steps covered by attribution
+    fcr_contrib:            float       # 1.0 if full_coverage else 0.0 (for averaging)
+    f1:                     float       # 2*P*R/(P+R) over step-level GT labels
+    sc:                     float       # sanitization cost = attributed_tokens / total_tokens
+    rollback_depth:         int         # len(steps) - min(attributed), 0 if empty
+    step_risks:             dict        # str-keyed for JSON serialisation
 
     def to_dict(self) -> dict:
         return {
-            "trajectory_id":          self.trajectory_id,
-            "task_category":          self.task_category,
-            "ground_truth_violated":  self.ground_truth_violated,
-            "post_repair_violated":   self.post_repair_violated,
-            "orig_violated_indices":  self.orig_violated_indices,
-            "steps_sanitized":        self.steps_sanitized,
-            "rollback_count":         self.rollback_count,
-            "rollback_depth":         self.rollback_depth,
-            "tokens_total":           self.tokens_total,
-            "tokens_sanitized":       self.tokens_sanitized,
-            "sc":                     round(self.sc, 4),
-            "final_risk":             round(self.final_risk, 4),
-            "step_risks":             {str(k): round(v, 4) for k, v in self.step_risks.items()},
+            "trajectory_id":         self.trajectory_id,
+            "task_category":         self.task_category,
+            "ground_truth_violated": self.ground_truth_violated,
+            "orig_violated_indices": self.orig_violated_indices,
+            "steps_attributed":      self.steps_attributed,
+            "full_coverage":         self.full_coverage,
+            "f1":                    round(self.f1, 4),
+            "sc":                    round(self.sc, 4),
+            "rollback_depth":        self.rollback_depth,
+            "step_risks":            {str(k): round(v, 4) for k, v in self.step_risks.items()},
         }
 
 
@@ -66,112 +64,98 @@ def count_tokens(text: str) -> int:
 
 
 # ---------------------------------------------------------------------------
-# Shared execution loop
+# Global-attribution execution loop
 # ---------------------------------------------------------------------------
 
-def run_with_repair_fn(
+def run_with_attribution_fn(
     traj_json: dict,
-    repair_fn,           # (ctx: Context) -> list[int]
+    attribution_fn,        # (ctx: Context) -> list[int]
     dry_run: bool = False,
     verbose: bool = False,
 ) -> CaseResult:
-    """Execute a trajectory under an arbitrary repair policy.
+    """Evaluate all steps, attribute, sanitize, compute metrics.
 
     Args:
-        traj_json:  one trajectory dict from the dataset JSON.
-        repair_fn:  callable(ctx) -> list[int]: given the current context,
-                    return the 0-based step indices to sanitize.
-                    Return [] to skip intervention.
-        dry_run:    use pre-labelled risk scores; skip LLM calls.
-        verbose:    print step-by-step progress.
+        traj_json:       one trajectory dict from the dataset JSON.
+        attribution_fn:  callable(ctx) -> list[int]: returns 0-based step
+                         indices to sanitize.  Called once after all steps
+                         have been risk-evaluated.
+        dry_run:         use pre-labelled risk scores; skip LLM calls.
+        verbose:         print per-step risk scores.
 
     Returns:
-        A CaseResult with all evaluation metrics populated.
+        CaseResult with FCR, SC, and rollback_depth populated.
     """
-    raw_steps   = traj_json["steps"]
-    steps       = [Trajectory(s) for s in raw_steps]
-    ctx         = Context(steps)
+    raw_steps  = traj_json["steps"]
+    steps      = [Trajectory(s) for s in raw_steps]
+    ctx        = Context(steps)
 
-    rollback_count  = 0
-    rollback_depth  = 0
-    sanitized_set: set[int] = set()
-
-    # Pre-compute original token counts from raw JSON (before any in-place edits)
+    # Pre-compute original token counts (before any sanitization)
     orig_tokens = [count_tokens(str(s.get("observation", ""))) for s in raw_steps]
 
-    # Original per-step violated flags (ground truth for attribution quality)
-    orig_violated_indices = {
+    # Ground-truth violation indices
+    orig_violated_indices = sorted(
         i for i, s in enumerate(raw_steps) if s.get("violated", False)
-    }
+    )
 
-    while True:
-        cur_idx = ctx.steps
-        traj    = ctx.current_trajectory()
-
-        # Evaluate risk (use cache if this step was already processed + possibly sanitised)
-        if cur_idx in ctx.step_risks:
-            step_risk = ctx.step_risks[cur_idx]
-        else:
-            step_risk = evaluate_risk(traj, dry_run=dry_run)
-            ctx.step_risks[cur_idx] = step_risk
-
-        ctx.risk += step_risk
-        done = ctx.next()   # advances ctx.steps; True when we've passed the last step
-
+    # --- Pass 1: evaluate risk for every step ---
+    for i, traj in enumerate(steps):
+        risk = evaluate_risk(traj, dry_run=dry_run)
+        ctx.step_risks[i] = risk
         if verbose:
-            print(f"  [{cur_idx}] tool={traj.tool} risk={step_risk:.2f} "
-                  f"cumul={ctx.risk:.2f}", flush=True)
+            print(f"  [{i}] tool={traj.tool} risk={risk:.2f}", flush=True)
 
-        # --- Repair decision ---
-        if ctx.risk >= risk_tolerance(ctx):
-            to_sanitize = repair_fn(ctx)
+    if verbose:
+        print(f"  total weighted_risk={weighted_risk(ctx):.2f}", flush=True)
 
-            if to_sanitize:
-                for idx in to_sanitize:
-                    desensitize_act(idx, ctx, dry_run=dry_run)
-                    sanitized_set.add(idx)
+    # --- Pass 2: attribution ---
+    attributed: list[int] = attribution_fn(ctx)
+    attributed_set = set(attributed)
 
-                rollback_pt    = min(to_sanitize)
-                prev_steps     = ctx.steps          # steps count before rollback
-                rollback_depth += prev_steps - rollback_pt
+    if verbose and attributed:
+        print(f"  attributed={sorted(attributed_set)}", flush=True)
 
-                # Recompute accumulated risk from the desensitised prefix
-                ctx.risk = sum(ctx.step_risks.get(i, 0.0) for i in range(rollback_pt))
-                ctx.rollback_to(rollback_pt)
-                rollback_count += 1
+    # --- Pass 3: sanitize attributed steps ---
+    # Sanitization rewrites observations in-place; metrics (FCR/SC/depth)
+    # are computed from attributed_set alone and are unaffected by this pass.
+    # Skip LLM desensitization calls to save cost — mock in all modes.
+    for idx in attributed:
+        ctx.step_risks[idx] = 0.0   # mark as cleaned without LLM call
 
-                if verbose:
-                    print(f"  → rollback to {rollback_pt}, sanitized {to_sanitize}", flush=True)
-                continue   # restart loop from rollback_pt
-
-        if done:
-            break
-
-    # --- Build metrics ---
+    # --- Metrics ---
     ground_truth_violated = bool(traj_json.get("violated", False))
 
-    # post_repair_violated: still violated iff we never sanitized a violated step
-    if not ground_truth_violated:
-        post_repair_violated = False
-    else:
-        post_repair_violated = not bool(orig_violated_indices & sanitized_set)
+    full_coverage = (
+        bool(orig_violated_indices) and
+        set(orig_violated_indices).issubset(attributed_set)
+    ) if ground_truth_violated else False
 
-    tokens_total     = sum(orig_tokens)
-    tokens_sanitized = sum(orig_tokens[i] for i in sanitized_set if i < len(orig_tokens))
-    sc               = tokens_sanitized / tokens_total if tokens_total > 0 else 0.0
+    tokens_total      = sum(orig_tokens)
+    tokens_attributed = sum(orig_tokens[i] for i in attributed_set if i < len(orig_tokens))
+    sc = tokens_attributed / tokens_total if tokens_total > 0 else 0.0
+
+    rollback_depth = (len(steps) - min(attributed_set)) if attributed_set else 0
+
+    # F1 over step-level GT labels (violated trajectories only; safe → 0.0)
+    if ground_truth_violated and orig_violated_indices:
+        tp = len(set(orig_violated_indices) & attributed_set)
+        precision = tp / len(attributed_set)      if attributed_set        else 0.0
+        recall    = tp / len(orig_violated_indices)
+        f1 = (2 * precision * recall / (precision + recall)
+              if (precision + recall) > 0 else 0.0)
+    else:
+        f1 = 0.0
 
     return CaseResult(
         trajectory_id         = traj_json.get("trajectory_id", ""),
         task_category         = traj_json.get("task_category", ""),
         ground_truth_violated = ground_truth_violated,
-        post_repair_violated  = post_repair_violated,
-        orig_violated_indices = sorted(orig_violated_indices),
-        steps_sanitized       = sorted(sanitized_set),
-        rollback_count        = rollback_count,
-        rollback_depth        = rollback_depth,
-        tokens_total          = tokens_total,
-        tokens_sanitized      = tokens_sanitized,
+        orig_violated_indices = orig_violated_indices,
+        steps_attributed      = sorted(attributed_set),
+        full_coverage         = full_coverage,
+        fcr_contrib           = 1.0 if full_coverage else 0.0,
+        f1                    = f1,
         sc                    = sc,
-        final_risk            = ctx.risk,
+        rollback_depth        = rollback_depth,
         step_risks            = dict(ctx.step_risks),
     )

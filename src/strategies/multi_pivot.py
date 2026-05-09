@@ -1,76 +1,56 @@
 """Multi-Pivot (MPR) — proposed method.
 
-Greedy multi-step attribution: selects the minimal set of steps whose
-combined desensitisation is projected to reduce accumulated risk below
-the target threshold.  Allows localized repair across multiple pivots.
+Greedy global attribution: selects the minimal set S of steps whose combined
+sanitization projects the total weighted risk below the target threshold theta.
+Achieves higher FCR than single-pivot while incurring lower cost than full
+attribution.
 """
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-from .base import CaseResult, run_with_repair_fn
-from evaluate import evaluate_risk
-from trajectory import Context, influence_factor, risk_tolerance, risk_decrease_threshold
+from .base import CaseResult, run_with_attribution_fn
+from trajectory import (
+    Context, influence_factor,
+    weighted_risk, projected_risk,
+    risk_tolerance, risk_decrease_threshold,
+)
 
 
-def attribute(ctx: Context, dry_run: bool = False) -> list[int]:
-    """Return the minimal greedy set of step indices to sanitize.
+def attribute(ctx: Context) -> list[int]:
+    """Greedy multi-pivot attribution.
 
-    Steps are ranked by influence-weighted risk contribution; the lowest-cost
-    subset that projects ctx.risk below risk_decrease_threshold(ctx) is chosen.
+    Steps are ranked by influence-weighted risk contribution w_i = c_i * phi(i).
+    We greedily add the highest-scoring step to S, recompute projected risk with
+    those steps zeroed out, and stop once projected_risk(S) <= theta.
+
+    Returns [] if total weighted risk is below the trigger threshold.
     """
-    if ctx.risk < risk_tolerance(ctx):
+    if weighted_risk(ctx) < risk_tolerance(ctx):
         return []
 
-    if ctx.steps == 0:
-        return [0] if ctx.step_risks.get(0, 0.0) > 0.0 else []
+    theta = risk_decrease_threshold(ctx)
 
-    target = risk_decrease_threshold(ctx)
+    # Build ranked list: primary sort by score descending, tie-break by index descending
+    # (prefer later steps — same risk reduction but smaller rollback depth)
+    contributions = [
+        (i, ctx.step_risks.get(i, 0.0) * influence_factor(ctx.trajectories[i].step, ctx))
+        for i in range(ctx.steps)
+    ]
+    contributions.sort(key=lambda x: (x[1], x[0]), reverse=True)
 
-    # Build (index, weighted_contribution) for all processed steps
-    contributions: list[tuple[int, float]] = []
-    for i in range(ctx.steps):
-        cached = ctx.step_risks.get(i)
-        if cached is None:
-            # Evaluate any step not yet scored (should be rare — normally all
-            # processed steps are cached before attribution is called)
-            from trajectory import Trajectory as _T  # avoid circular at module level
-            cached = evaluate_risk(ctx.trajectories[i], dry_run=dry_run)
-            ctx.step_risks[i] = cached
-        step_loc = ctx.trajectories[i].step   # 1-indexed field from JSON
-        weight   = influence_factor(step_loc, ctx)
-        contributions.append((i, cached * weight))
-
-    # Greedy: pick highest-contribution steps until recomputed risk ≤ target.
-    # After tentatively zeroing out each selected step, recompute the full
-    # prefix sum rather than subtracting the weighted score — this avoids the
-    # mismatch between the unweighted cumulative risk r_t and the weighted
-    # scores w_i used for ranking.
-    contributions.sort(key=lambda x: x[1], reverse=True)
     selected: list[int] = []
     zeroed: set[int] = set()
-    for idx, _ in contributions:
+
+    for idx, score in contributions:
+        if score <= 0.0:
+            continue  # zero-risk step, skip but don't stop
         selected.append(idx)
         zeroed.add(idx)
-        recomputed = sum(
-            0.0 if i in zeroed else ctx.step_risks.get(i, 0.0)
-            for i in range(ctx.steps)
-        )
-        if recomputed <= target:
+        if projected_risk(ctx, zeroed) <= theta:
             break
 
     return selected
 
 
-def _make_repair_fn(dry_run: bool):
-    def _repair_fn(ctx: Context) -> list[int]:
-        return attribute(ctx, dry_run=dry_run)
-    return _repair_fn
-
-
 def run_trajectory(traj_json: dict, dry_run: bool = False, verbose: bool = False) -> CaseResult:
-    return run_with_repair_fn(
-        traj_json,
-        _make_repair_fn(dry_run),
-        dry_run=dry_run,
-        verbose=verbose,
-    )
+    return run_with_attribution_fn(traj_json, attribute, dry_run=dry_run, verbose=verbose)

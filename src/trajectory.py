@@ -1,4 +1,4 @@
-"""Trajectory data classes and shared risk-accumulation helpers."""
+"""Trajectory data classes and shared attribution helpers."""
 
 
 class Trajectory:
@@ -15,57 +15,54 @@ class Trajectory:
 
 
 class Context:
-    """Mutable execution state for a single trajectory run."""
+    """Execution context for a single trajectory.
+
+    In the global-attribution framework the full trajectory is evaluated
+    in one pass before any attribution decision is made.  Context stores
+    the complete step list and their cached risk scores.
+    """
 
     def __init__(self, trajectories: list[Trajectory]):
         self.trajectories  = trajectories
-        self.steps         = 0      # pointer = index of the *next* step to process
-        self.risk          = 0.0    # cumulative accumulated risk
-        self.step_risks: dict[int, float] = {}  # cached per-step risk scores
-
-    # ------------------------------------------------------------------
-
-    def next(self) -> bool:
-        """Advance the step pointer by one.
-
-        Returns True when the pointer has moved past the last step
-        (i.e. the trajectory is finished).
-        """
-        self.steps += 1
-        return self.steps >= len(self.trajectories)
-
-    def rollback_to(self, step: int) -> None:
-        """Reset the step pointer to *step* (0-based index)."""
-        self.steps = step
-
-    def current_trajectory(self) -> Trajectory:
-        return self.trajectories[self.steps]
+        self.steps         = len(trajectories)   # total step count (fixed)
+        self.step_risks: dict[int, float] = {}   # cached per-step risk scores
 
 
 # ---------------------------------------------------------------------------
-# Shared risk-accumulation helpers
+# Shared attribution helpers
 # ---------------------------------------------------------------------------
 
 def influence_factor(step_loc: int, ctx: Context) -> float:
-    """Weight for a step's contribution: later steps have more influence.
+    """Weight for a step's contribution to attributed risk.
 
     step_loc is the 1-indexed step number from the JSON.
-    ctx.steps is the count of steps already processed at the point of calling.
+    Returns 1.0 (uniform weighting).
     """
-    return step_loc / ctx.steps
+    return 1.0
+
+
+def weighted_risk(ctx: Context) -> float:
+    """Total influence-weighted risk across all steps."""
+    return sum(
+        ctx.step_risks.get(i, 0.0) * influence_factor(ctx.trajectories[i].step, ctx)
+        for i in range(ctx.steps)
+    )
+
+
+def projected_risk(ctx: Context, zeroed: set[int]) -> float:
+    """Weighted risk with the steps in *zeroed* treated as sanitized (c_i = 0)."""
+    return sum(
+        0.0 if i in zeroed
+        else ctx.step_risks.get(i, 0.0) * influence_factor(ctx.trajectories[i].step, ctx)
+        for i in range(ctx.steps)
+    )
 
 
 def risk_tolerance(ctx: Context) -> float:
-    """Accumulated-risk threshold above which a repair is triggered."""
-    return 0.5
+    """Total-risk threshold above which attribution is triggered."""
+    return 0.75
 
 
 def risk_decrease_threshold(ctx: Context) -> float:
-    """Target accumulated-risk level for multi-pivot repair.
-
-    After greedy sanitisation, risk must fall to AT MOST this value.
-    We aim to restore well into safe territory (half the tolerance ceiling)
-    rather than merely reducing by a small delta, so that multiple pivot points
-    are selected when the accumulated risk significantly exceeds tolerance.
-    """
-    return risk_tolerance(ctx) * 0.5
+    """Target projected risk for multi-pivot greedy stopping criterion."""
+    return 0.25

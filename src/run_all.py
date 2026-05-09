@@ -21,6 +21,7 @@ import argparse
 import json
 import math
 import os
+import random
 import sys
 import time
 
@@ -50,12 +51,10 @@ def _run_one_strategy(name, run_fn, trajectories, dry_run, verbose):
 
 
 SCALAR_METRICS = [
-    "violation_reduction",
-    "unsafe_output_rate",
+    "fcr",
+    "avg_f1",
     "avg_sc",
-    "avg_sanitized_steps",
     "avg_rollback_depth",
-    "avg_final_risk",
 ]
 
 
@@ -87,11 +86,10 @@ def _aggregate(all_runs: dict[str, list[dict]]) -> dict:
 def _print_aggregate_table(agg: dict) -> None:
     header = (
         f"{'strategy':<22} "
-        f"{'VR mean±std':>14} "
-        f"{'unsafe% mean±std':>18} "
+        f"{'FCR mean±std':>14} "
+        f"{'F1 mean±std':>13} "
         f"{'SC mean±std':>13} "
-        f"{'san_steps m±s':>14} "
-        f"{'depth m±s':>10}"
+        f"{'depth mean±std':>15}"
     )
     print(header)
     print("-" * len(header))
@@ -100,11 +98,10 @@ def _print_aggregate_table(agg: dict) -> None:
             return f"{entry[k]['mean']:.3f}±{entry[k]['std']:.3f}"
         print(
             f"{name:<22} "
-            f"{_ms('violation_reduction'):>14} "
-            f"{_ms('unsafe_output_rate'):>18} "
+            f"{_ms('fcr'):>14} "
+            f"{_ms('avg_f1'):>13} "
             f"{_ms('avg_sc'):>13} "
-            f"{_ms('avg_sanitized_steps'):>14} "
-            f"{_ms('avg_rollback_depth'):>10}"
+            f"{_ms('avg_rollback_depth'):>15}"
         )
 
 
@@ -127,6 +124,11 @@ def main():
                         help="Base output directory (default: results/).")
     parser.add_argument("-n", type=int, default=None,
                         help="Limit to first N trajectories (default: all).")
+    parser.add_argument("--balanced", action="store_true",
+                        help=(
+                            "Each run samples n/2 violated + n/2 safe trajectories "
+                            "at random (requires -n). Seed varies per run for variance."
+                        ))
     parser.add_argument("--dry-run", action="store_true",
                         help="Use pre-labelled risk scores; skip LLM calls.")
     parser.add_argument("--verbose", action="store_true",
@@ -139,15 +141,21 @@ def main():
     out_base  = args.out_dir if os.path.isabs(args.out_dir) else os.path.join(project_root, args.out_dir)
 
     trajectories = _load_data(data_path)
-    if args.n is not None:
+    if args.n is not None and not args.balanced:
         trajectories = trajectories[: args.n]
+
+    # Pre-split for --balanced mode
+    _violated_pool = [t for t in trajectories if t.get("violated")]
+    _safe_pool     = [t for t in trajectories if not t.get("violated")]
 
     to_run = list(STRATEGIES.keys()) if args.strategy == "all" else [args.strategy]
 
+    n_label = f"n={args.n}" if args.n else "n=all"
     print(
         f"Loaded {len(trajectories)} trajectories | "
         f"strategies: {to_run} | "
-        f"N={args.N}"
+        f"N={args.N} | {n_label}"
+        + (" [BALANCED]" if args.balanced else "")
         + (" [DRY RUN]" if args.dry_run else ""),
         flush=True,
     )
@@ -161,8 +169,21 @@ def main():
         run_dir = os.path.join(out_base, f"run_{run_idx:03d}")
         os.makedirs(run_dir, exist_ok=True)
 
+        # Sample balanced subset for this run (seed varies per run)
+        if args.balanced and args.n is not None:
+            half = args.n // 2
+            rng  = random.Random(run_idx)  # different sample each run
+            run_trajs = (
+                rng.sample(_violated_pool, min(half, len(_violated_pool))) +
+                rng.sample(_safe_pool,     min(half, len(_safe_pool)))
+            )
+            rng.shuffle(run_trajs)
+        else:
+            run_trajs = trajectories
+
         print(f"\n{'='*60}", flush=True)
-        print(f"Run {run_idx}/{args.N}", flush=True)
+        print(f"Run {run_idx}/{args.N}  ({len(run_trajs)} trajectories, "
+              f"{sum(t.get('violated',False) for t in run_trajs)} violated)", flush=True)
         print(f"{'='*60}", flush=True)
 
         for name in to_run:
@@ -170,7 +191,7 @@ def main():
             t0 = time.time()
 
             output = _run_one_strategy(
-                name, STRATEGIES[name], trajectories,
+                name, STRATEGIES[name], run_trajs,
                 dry_run=args.dry_run, verbose=args.verbose,
             )
             all_runs[name].append(output["summary"])
@@ -181,9 +202,10 @@ def main():
 
             s = output["summary"]
             print(
-                f"VR={s['violation_reduction']:.3f}  "
+                f"FCR={s['fcr']:.3f}  "
+                f"F1={s['avg_f1']:.3f}  "
                 f"SC={s['avg_sc']:.3f}  "
-                f"steps={s['avg_sanitized_steps']:.2f}  "
+                f"depth={s['avg_rollback_depth']:.2f}  "
                 f"[{time.time()-t0:.1f}s]",
                 flush=True,
             )

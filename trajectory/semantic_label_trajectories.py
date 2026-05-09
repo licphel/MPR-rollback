@@ -1,4 +1,8 @@
-#!/usr/bin/env python3
+"""
+[OBSOLETE]
+This file is no longer used, but to show the initial idea of this experiment.
+"""
+
 """
 Rule-based labeling script for real_trajectories.json.
 Applies trajectory-level and step-level violated flags per the specification.

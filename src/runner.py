@@ -32,6 +32,7 @@ sys.path.insert(0, _SRC)
 
 from strategies import STRATEGIES
 from metrics import compute_summary
+from evaluate import set_model_source, get_active_model
 
 
 # ---------------------------------------------------------------------------
@@ -68,12 +69,12 @@ def _run_strategy(
         cases.append(case)
 
         elapsed = time.time() - t0
-        marker  = "X" if case["post_repair_violated"] else "O"
+        marker  = "X" if (case["ground_truth_violated"] and not case["full_coverage"]) else "O"
         print(
-            f"  {marker} vio={case['ground_truth_violated']}→{case['post_repair_violated']}"
-            f"  sc={case['sc']:.2f}  sanitized={len(case['steps_sanitized'])}"
-            f"  rollbacks={case['rollback_count']}  depth={case['rollback_depth']}"
-            f"  risk={case['final_risk']:.3f}  [{elapsed:.1f}s]",
+            f"  {marker} vio={case['ground_truth_violated']}"
+            f"  cov={case['full_coverage']}"
+            f"  sc={case['sc']:.2f}  attributed={case['steps_attributed']}"
+            f"  depth={case['rollback_depth']}  [{elapsed:.1f}s]",
             flush=True,
         )
 
@@ -112,6 +113,15 @@ def main() -> None:
         help="Limit to the first N trajectories (default: all).",
     )
     parser.add_argument(
+        "--model-source",
+        default=None,
+        help=(
+            "Model source for risk evaluation: "
+            "deepseek (default), deepseek-r1, qwen-7b, qwen-72b, custom. "
+            "Or set EVAL_MODEL_SOURCE in .env."
+        ),
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help=(
@@ -126,6 +136,9 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    if args.model_source:
+        set_model_source(args.model_source)
+
     # Resolve data path relative to the project root (parent of src/)
     data_path = args.data
     if not os.path.isabs(data_path):
@@ -138,7 +151,7 @@ def main() -> None:
 
     print(
         f"Loaded {len(trajectories)} trajectories from {data_path}"
-        + (" [DRY RUN]" if args.dry_run else ""),
+        + (" [DRY RUN]" if args.dry_run else f" [model={get_active_model()}]"),
         flush=True,
     )
 
@@ -177,19 +190,15 @@ def main() -> None:
     print(f"\n{'='*60}")
     print("Summary comparison")
     print(f"{'='*60}")
-    header = f"{'strategy':<22} {'VR':>6} {'FCR':>6} {'unsafe%':>8} {'avg_SC':>7} {'avg_san_steps':>14} {'avg_depth':>10} {'avg_risk':>9}"
+    header = f"{'strategy':<22} {'FCR':>6} {'avg_SC':>7} {'avg_depth':>10}"
     print(header)
     print("-" * len(header))
     for s in all_summaries:
         print(
             f"{s['strategy']:<22} "
-            f"{s['violation_reduction']:>6.3f} "
-            f"{s.get('full_coverage_rate', 0.0):>6.3f} "
-            f"{s['unsafe_output_rate']:>8.3f} "
+            f"{s.get('fcr', 0.0):>6.3f} "
             f"{s['avg_sc']:>7.3f} "
-            f"{s['avg_sanitized_steps']:>14.2f} "
-            f"{s['avg_rollback_depth']:>10.2f} "
-            f"{s['avg_final_risk']:>9.3f}"
+            f"{s['avg_rollback_depth']:>10.2f}"
         )
 
     print(f"\nDone. Results written to {out_dir}/")
