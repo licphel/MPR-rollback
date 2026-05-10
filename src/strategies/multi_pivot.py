@@ -1,9 +1,9 @@
-"""Multi-Pivot (MPR) — proposed method.
+"""MPA-Greedy — Multi-Pivot Attribution with greedy step selection.
 
 Greedy global attribution: selects the minimal set S of steps whose combined
 sanitization projects the total weighted risk below the target threshold theta.
-Achieves higher FCR than single-pivot while incurring lower cost than full
-attribution.
+Steps are ranked by influence-weighted risk score (descending), with tie-breaking
+by step index (descending) to prefer later steps and minimise rollback depth.
 """
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))

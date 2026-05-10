@@ -1,0 +1,202 @@
+{
+  "no_repair": {
+    "strategy": "no_repair",
+    "n_runs": 3,
+    "fcr": {
+      "mean": 0.0,
+      "std": 0.0,
+      "runs": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    "avg_f1": {
+      "mean": 0.0,
+      "std": 0.0,
+      "runs": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    "avg_sc": {
+      "mean": 0.0,
+      "std": 0.0,
+      "runs": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    "avg_rollback_depth": {
+      "mean": 0.0,
+      "std": 0.0,
+      "runs": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    }
+  },
+  "single_pivot": {
+    "strategy": "single_pivot",
+    "n_runs": 3,
+    "fcr": {
+      "mean": 0.0143,
+      "std": 0.0,
+      "runs": [
+        0.0143,
+        0.0143,
+        0.0143
+      ]
+    },
+    "avg_f1": {
+      "mean": 0.2799,
+      "std": 0.005,
+      "runs": [
+        0.2734,
+        0.2807,
+        0.2855
+      ]
+    },
+    "avg_sc": {
+      "mean": 0.0739,
+      "std": 0.002,
+      "runs": [
+        0.0767,
+        0.0718,
+        0.0733
+      ]
+    },
+    "avg_rollback_depth": {
+      "mean": 2.1111,
+      "std": 0.0393,
+      "runs": [
+        2.0833,
+        2.0833,
+        2.1667
+      ]
+    }
+  },
+  "multi_pivot": {
+    "strategy": "multi_pivot",
+    "n_runs": 3,
+    "fcr": {
+      "mean": 0.4,
+      "std": 0.0202,
+      "runs": [
+        0.3857,
+        0.3857,
+        0.4286
+      ]
+    },
+    "avg_f1": {
+      "mean": 0.6443,
+      "std": 0.0049,
+      "runs": [
+        0.6485,
+        0.6374,
+        0.6471
+      ]
+    },
+    "avg_sc": {
+      "mean": 0.3243,
+      "std": 0.0037,
+      "runs": [
+        0.3294,
+        0.3207,
+        0.3227
+      ]
+    },
+    "avg_rollback_depth": {
+      "mean": 6.4037,
+      "std": 0.0555,
+      "runs": [
+        6.3889,
+        6.4778,
+        6.3444
+      ]
+    }
+  },
+  "multi_pivot_random": {
+    "strategy": "multi_pivot_random",
+    "n_runs": 3,
+    "fcr": {
+      "mean": 0.4143,
+      "std": 0.0117,
+      "runs": [
+        0.4,
+        0.4286,
+        0.4143
+      ]
+    },
+    "avg_f1": {
+      "mean": 0.6516,
+      "std": 0.004,
+      "runs": [
+        0.6516,
+        0.6467,
+        0.6565
+      ]
+    },
+    "avg_sc": {
+      "mean": 0.3243,
+      "std": 0.0029,
+      "runs": [
+        0.3216,
+        0.3229,
+        0.3284
+      ]
+    },
+    "avg_rollback_depth": {
+      "mean": 6.4166,
+      "std": 0.0614,
+      "runs": [
+        6.4111,
+        6.4944,
+        6.3444
+      ]
+    }
+  },
+  "full_attribution": {
+    "strategy": "full_attribution",
+    "n_runs": 3,
+    "fcr": {
+      "mean": 1.0,
+      "std": 0.0,
+      "runs": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "avg_f1": {
+      "mean": 0.5903,
+      "std": 0.0,
+      "runs": [
+        0.5903,
+        0.5903,
+        0.5903
+      ]
+    },
+    "avg_sc": {
+      "mean": 1.0,
+      "std": 0.0,
+      "runs": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "avg_rollback_depth": {
+      "mean": 9.9,
+      "std": 0.0,
+      "runs": [
+        9.9,
+        9.9,
+        9.9
+      ]
+    }
+  }
+}

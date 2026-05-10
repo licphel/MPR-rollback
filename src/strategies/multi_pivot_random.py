@@ -1,14 +1,13 @@
-"""Ablation: Multi-Pivot with random step selection.
+"""MPA-Random — Multi-Pivot Attribution with random step selection.
 
-Identical stopping criterion to multi_pivot, but steps are selected in
-random order instead of descending weighted score.  Purpose: verify that
-greedy ranking matters — random selection should achieve lower FCR and/or
-higher SC than the greedy baseline.
+Same framework and stopping criterion as MPA-Greedy, but steps are selected
+in random order instead of descending risk score.  Serves as a comparison
+point to isolate the contribution of greedy ranking within the MPA framework.
 """
 import sys, os, random, time
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-from strategies.base import CaseResult, run_with_attribution_fn
+from .base import CaseResult, run_with_attribution_fn
 from trajectory import Context, weighted_risk, projected_risk, risk_tolerance, risk_decrease_threshold
 
 

@@ -1,4 +1,4 @@
-# Multi-Pivot Rollback (MPR)
+# Multi-Pivot Attribution (MPA)
 
 Attribution-guided sanitization framework for LLM agent trajectories.
 Identifies the minimal set of steps responsible for a policy violation and
@@ -36,7 +36,6 @@ EVAL_MODEL_SOURCE=deepseek        # default
 1. Generate trajectories     trajectory/real_datagen.py
 2. Label violations          trajectory/llm_label_trajectories.py
 3. Run benchmark             src/run_all.py
-4. Run ablation              src/ablation/run_ablation.py
 ```
 
 ---
@@ -151,30 +150,10 @@ results/
 
 ---
 
-## 4. Ablation
-
-Compares Multi-Pivot (greedy) against random step selection order with the
-same stopping criterion — verifies that greedy ranking matters.
-
-```bash
-# Dry run
-python src/ablation/run_ablation.py --dry-run -N 1 -n 20
-
-# Full run, 3 repetitions, balanced
-python src/ablation/run_ablation.py -N 3 --balanced -n 180
-
-# Custom output
-python src/ablation/run_ablation.py -N 3 --out-dir results/ablation_full
-```
-
-Output: `results/ablation/aggregate.json`
-
----
-
-## Project Structure
+## 3. Benchmark
 
 ```
-multi-pivot-rollback/
+multi-pivot-attribution/
 ├── .env                              # API keys (not committed)
 ├── trajectory/
 │   ├── real_datagen.py               # Trajectory generator (DeepSeek + LangChain)
@@ -183,19 +162,16 @@ multi-pivot-rollback/
 │   └── real_trajectories.json        # Dataset (180 trajectories: 70 violated, 110 safe)
 ├── src/
 │   ├── run_all.py                    # Multi-run benchmark with aggregation
-│   ├── evaluate.py                   # LLM risk scorer (continuous [0,1])
+│   ├── evaluate.py                   # LLM risk scorer (continuous [0,1], context-aware)
 │   ├── trajectory.py                 # Trajectory / Context data classes + attribution helpers
 │   ├── metrics.py                    # FCR, F1, SC, Rollback Depth
-│   ├── strategies/
-│   │   ├── __init__.py               # STRATEGIES registry
-│   │   ├── no_repair.py
-│   │   ├── single_pivot.py
-│   │   ├── multi_pivot.py            # Proposed method
-│   │   └── full_sanitization.py      # Full Attribution baseline
-│   └── ablation/
-│       ├── __init__.py               # ABLATIONS registry
-│       ├── run_ablation.py
-│       └── multi_pivot_random.py     # Random order, same stopping criterion
+│   └── strategies/
+│       ├── __init__.py               # STRATEGIES registry
+│       ├── no_repair.py
+│       ├── single_pivot.py
+│       ├── multi_pivot.py            # MPA-Greedy (proposed method)
+│       ├── multi_pivot_random.py     # MPA-Random (comparison)
+│       └── full_sanitization.py      # Full Attribution baseline
 └── results/                          # Benchmark outputs (gitignored)
 ```
 
@@ -215,7 +191,4 @@ python src/run_all.py --dry-run -N 1 -n 20 --balanced
 
 # 4. Full benchmark
 python src/run_all.py -N 3 --balanced -n 180 --out-dir results/full_run
-
-# 5. Ablation
-python src/ablation/run_ablation.py -N 3 --balanced -n 180 --out-dir results/ablation_full
 ```

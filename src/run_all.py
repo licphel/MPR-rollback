@@ -131,9 +131,15 @@ def main():
                         ))
     parser.add_argument("--dry-run", action="store_true",
                         help="Use pre-labelled risk scores; skip LLM calls.")
+    parser.add_argument("--model-source", default=None,
+                        help="Risk evaluator model source (e.g. deepseek, qwen-7b, qwen-72b).")
     parser.add_argument("--verbose", action="store_true",
                         help="Print per-step risk scores.")
     args = parser.parse_args()
+
+    if args.model_source:
+        from evaluate import set_model_source
+        set_model_source(args.model_source)
 
     # Resolve paths relative to project root
     project_root = os.path.dirname(_SRC)

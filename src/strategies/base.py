@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-from evaluate import evaluate_risk
+from evaluate import evaluate_trajectory_risks
 from trajectory import Trajectory, Context, weighted_risk, risk_tolerance
 
 
@@ -98,12 +98,12 @@ def run_with_attribution_fn(
         i for i, s in enumerate(raw_steps) if s.get("violated", False)
     )
 
-    # --- Pass 1: evaluate risk for every step ---
-    for i, traj in enumerate(steps):
-        risk = evaluate_risk(traj, dry_run=dry_run)
+    # --- Pass 1: evaluate risk for all steps in one context-aware call ---
+    risks = evaluate_trajectory_risks(steps, dry_run=dry_run)
+    for i, risk in risks.items():
         ctx.step_risks[i] = risk
         if verbose:
-            print(f"  [{i}] tool={traj.tool} risk={risk:.2f}", flush=True)
+            print(f"  [{i}] tool={steps[i].tool} risk={risk:.2f}", flush=True)
 
     if verbose:
         print(f"  total weighted_risk={weighted_risk(ctx):.2f}", flush=True)
